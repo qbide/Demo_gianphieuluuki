@@ -553,143 +553,185 @@ body {
 
 		<script src="index.js"></script>
 		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":43557092,"index.wasm":37896978},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
-const GODOT_THREADS_ENABLED = false;
-const engine = new Engine(GODOT_CONFIG);
-
-(function () {
-	const statusOverlay = document.getElementById('status');
-	const statusProgress = document.getElementById('status-progress');
-	const statusNotice = document.getElementById('status-notice');
-
-	let initializing = true;
-	let statusMode = '';
-
-	function setStatusMode(mode) {
-		if (statusMode === mode || !initializing) {
-			return;
-		}
-		if (mode === 'hidden') {
-			statusOverlay.remove();
-			initializing = false;
-			return;
-		}
-		statusOverlay.style.visibility = 'visible';
-		statusProgress.style.display = mode === 'progress' ? 'block' : 'none';
-		statusNotice.style.display = mode === 'notice' ? 'block' : 'none';
-		statusMode = mode;
-	}
-
-	function setStatusNotice(text) {
-		while (statusNotice.lastChild) {
-			statusNotice.removeChild(statusNotice.lastChild);
-		}
-		const lines = text.split('\n');
-		lines.forEach((line) => {
-			statusNotice.appendChild(document.createTextNode(line));
-			statusNotice.appendChild(document.createElement('br'));
-		});
-	}
-
-	function displayFailureNotice(err) {
-		console.error(err);
-		if (err instanceof Error) {
-			setStatusNotice(err.message);
-		} else if (typeof err === 'string') {
-			setStatusNotice(err);
-		} else {
-			setStatusNotice('An unknown error occurred.');
-		}
-		setStatusMode('notice');
-		initializing = false;
-	}
-
-	const missing = Engine.getMissingFeatures({
-		threads: GODOT_THREADS_ENABLED,
-	});
-
-	if (missing.length !== 0) {
-		if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
-			let serviceWorkerRegistrationPromise;
-			try {
-				serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
-			} catch (err) {
-				serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
-			}
-			// There's a chance that installing the service worker would fix the issue
-			Promise.race([
-				serviceWorkerRegistrationPromise.then((registration) => {
-					if (registration != null) {
-						return Promise.reject(new Error('Service worker already exists.'));
-					}
-					return registration;
-				}).then(() => engine.installServiceWorker()),
-				// For some reason, `getRegistration()` can stall
-				new Promise((resolve) => {
-					setTimeout(() => resolve(), 2000);
-				}),
-			]).then(() => {
-				// Reload if there was no error.
-				window.location.reload();
-			}).catch((err) => {
-				clearInterval(watchdog);
-
-console.error(
-    `[GODOT FAILED] startGame rejected sau ${Math.round(performance.now() - startTime)} ms`,
-    err
-);
-displayFailureNotice(err);
-			});
-		} else {
-			// Display the message as usual
-			const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
-			displayFailureNotice(missingMsg + missing.join('\n'));
-		}
-	} else {
-		setStatusMode('progress');
-
-		// === [BỔ SUNG LOG VÒNG ĐỜI GODOT CHO DEBUG PANEL] ===
-		console.log('[GODOT] Bắt đầu gọi engine.startGame()...');
-		console.log("[GODOT] startGame() called");
-
-const startTime = performance.now();
-
-const watchdog = setInterval(() => {
-    console.warn(
-        `[GODOT] startGame() vẫn đang pending sau ${Math.round(performance.now() - startTime)} ms`
-    );
-}, 5000);
-		engine.startGame({
-			'onProgress': function (current, total) {
-				if (current > 0 && total > 0) {
-					statusProgress.value = current;
-					statusProgress.max = total;
-					// Log mỗi khi đạt mốc 25%, 50%, 75%, 100%
-					var pct = ((current / total) * 100).toFixed(2);
-
-if (window.__last_pct !== pct) {
-    window.__last_pct = pct;
-    console.log(`[GODOT Loading] ${pct}% (${current}/${total} bytes)`);
-}
-				} else {
-					statusProgress.removeAttribute('value');
-					statusProgress.removeAttribute('max');
+			// ==================== 1. HOOK WEBGL & RENDERER ====================
+			(function() {
+				const oldGetContext = HTMLCanvasElement.prototype.getContext;
+				HTMLCanvasElement.prototype.getContext = function(type, ...args) {
+					console.log("[WEBGL] getContext called:", type);
+					const gl = oldGetContext.call(this, type, ...args);
+					console.log("[WEBGL] getContext result:", gl ? "SUCCESS" : "NULL/FAILED", gl);
+					return gl;
+				};
+			
+				if (typeof WebGLRenderingContext !== 'undefined') {
+					const oldCompile = WebGLRenderingContext.prototype.compileShader;
+					WebGLRenderingContext.prototype.compileShader = function(shader) {
+						console.log("[GL1] compileShader");
+						return oldCompile.call(this, shader);
+					};
 				}
-			},
-		}).then(() => {
-			clearInterval(watchdog);
-
-console.log(
-    `[GODOT SUCCESS] startGame resolved sau ${Math.round(performance.now() - startTime)} ms`
-);
-			setStatusMode('hidden');
-		}, function(err) {
-			console.error('[GODOT CRASH] engine.startGame() bị REJECTED:', err);
-			displayFailureNotice(err);
-		});
-	}
-}());
-		</script>
+			
+				if (typeof WebGL2RenderingContext !== 'undefined') {
+					const oldCompile2 = WebGL2RenderingContext.prototype.compileShader;
+					WebGL2RenderingContext.prototype.compileShader = function(shader) {
+						console.log("[GL2] compileShader");
+						return oldCompile2.call(this, shader);
+					};
+				}
+			})();
+			
+			// ==================== 2. HOOK AUDIO & RAF ====================
+			(function() {
+				const OrigAC = window.AudioContext || window.webkitAudioContext;
+				if (OrigAC) {
+					const oldResume = OrigAC.prototype.resume;
+					OrigAC.prototype.resume = function() {
+						console.log("[AUDIO] resume called");
+						return oldResume.call(this);
+					};
+				}
+			
+				const oldRAF = window.requestAnimationFrame;
+				let rafCount = 0;
+				window.requestAnimationFrame = function(cb) {
+					if (rafCount < 3) {
+						console.log("[RAF] First frame animation requested");
+						rafCount++;
+					}
+					return oldRAF(cb);
+				};
+			})();
+			
+			// ==================== 3. GODOT INIT & WATCHDOG ====================
+			const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":43557092,"index.wasm":37896978},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+			const GODOT_THREADS_ENABLED = false;
+			
+			const engine = new Engine(GODOT_CONFIG);
+			console.log("[A] Engine created:", engine);
+			
+			(function () {
+				const statusOverlay = document.getElementById('status');
+				const statusProgress = document.getElementById('status-progress');
+				const statusNotice = document.getElementById('status-notice');
+			
+				let initializing = true;
+				let statusMode = '';
+			
+				function setStatusMode(mode) {
+					if (statusMode === mode || !initializing) {
+						return;
+					}
+					if (mode === 'hidden') {
+						statusOverlay.remove();
+						initializing = false;
+						return;
+					}
+					statusOverlay.style.visibility = 'visible';
+					statusProgress.style.display = mode === 'progress' ? 'block' : 'none';
+					statusNotice.style.display = mode === 'notice' ? 'block' : 'none';
+					statusMode = mode;
+				}
+			
+				function setStatusNotice(text) {
+					while (statusNotice.lastChild) {
+						statusNotice.removeChild(statusNotice.lastChild);
+					}
+					const lines = text.split('\n');
+					lines.forEach((line) => {
+						statusNotice.appendChild(document.createTextNode(line));
+						statusNotice.appendChild(document.createElement('br'));
+					});
+				}
+			
+				function displayFailureNotice(err) {
+					console.error("[GODOT DISPLAY FAILURE]", err);
+					if (err instanceof Error) {
+						setStatusNotice(err.message);
+					} else if (typeof err === 'string') {
+						setStatusNotice(err);
+					} else {
+						setStatusNotice('An unknown error occurred.');
+					}
+					setStatusMode('notice');
+					initializing = false;
+				}
+			
+				const missing = Engine.getMissingFeatures({
+					threads: GODOT_THREADS_ENABLED,
+				});
+			
+				if (missing.length !== 0) {
+					if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
+						let serviceWorkerRegistrationPromise;
+						try {
+							serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
+						} catch (err) {
+							serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
+						}
+						Promise.race([
+							serviceWorkerRegistrationPromise.then((registration) => {
+								if (registration != null) {
+									return Promise.reject(new Error('Service worker already exists.'));
+								}
+								return registration;
+							}).then(() => engine.installServiceWorker()),
+							new Promise((resolve) => {
+								setTimeout(() => resolve(), 2000);
+							}),
+						]).then(() => {
+							window.location.reload();
+						}).catch((err) => {
+							console.error('[SW ERROR]', err);
+							displayFailureNotice(err);
+						});
+					} else {
+						const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
+						displayFailureNotice(missingMsg + missing.join('\n'));
+					}
+				} else {
+					setStatusMode('progress');
+			
+					console.log("[B] About to call startGame()");
+					const startTime = performance.now();
+			
+					// Watchdog đếm nhịp mỗi 5 giây
+					const watchdog = setInterval(() => {
+						console.warn(`[GODOT WATCHDOG] startGame() vẫn pending sau ${Math.round(performance.now() - startTime)} ms`);
+					}, 5000);
+			
+					// Khởi chạy game
+					const p = engine.startGame({
+						'onProgress': function (current, total) {
+							if (current > 0 && total > 0) {
+								statusProgress.value = current;
+								statusProgress.max = total;
+								var pct = ((current / total) * 100).toFixed(2);
+								if (window.__last_pct !== pct) {
+									window.__last_pct = pct;
+									console.log(`[GODOT Loading] ${pct}% (${current}/${total} bytes)`);
+								}
+							} else {
+								statusProgress.removeAttribute('value');
+								statusProgress.removeAttribute('max');
+							}
+						},
+					});
+			
+					console.log("[C] startGame() returned promise:", p);
+			
+					p.then(() => {
+						clearInterval(watchdog);
+						console.log("[D] startGame RESOLVED successfully!");
+						console.log(`[GODOT SUCCESS] Total time: ${Math.round(performance.now() - startTime)} ms`);
+						setStatusMode('hidden');
+					}).catch((e) => {
+						clearInterval(watchdog);
+						console.error("[E] startGame REJECTED:", e);
+						displayFailureNotice(e);
+					});
+				}
+			}());
+			</script>
 	</body>
 </html>
 
