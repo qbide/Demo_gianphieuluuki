@@ -716,6 +716,7 @@ const Engine = (function () {
 					return new Promise(function (resolve, reject) {
 						promise.then(function (response) {
 							const cloned = new Response(response.clone().body, { 'headers': [['content-type', 'application/wasm']] });
+							console.log("[INIT-1] Before Godot()");
 							Godot(me.config.getModuleConfig(loadPath, cloned)).then(function (module) {
 								const paths = me.config.persistentPaths;
 								module['initFS'](paths).then(function (err) {
