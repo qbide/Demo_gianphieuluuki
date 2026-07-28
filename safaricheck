@@ -1,2 +1,3 @@
 if(currentSafariVersion<150200) ... 
 ->if(false){}
+nhớ thay ?v=
